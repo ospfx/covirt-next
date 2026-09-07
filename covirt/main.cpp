@@ -81,30 +81,31 @@ int main(int argc, char **argv)
 
     std::vector<covirt::basic_block> basic_blocks;
     for (auto& section : file.sections()) {
-        if (file.is_section_executable(section)) {
-            auto content = section.content();
-            auto runtime_address = file.imagebase() + section.virtual_address();
-            auto bb = covirt::basic_block{};
-            
-            covirt::disasm(content, runtime_address, [&](uint64_t address, ZydisDisassembledInstruction ins) {
-                auto offset = address - runtime_address; 
-
-                if (std::memcmp(&content[0] + offset - 16, __covirt_vm_start_bytes, 16) == 0)
-                    bb.start_va = address;
-                if (std::memcmp(&content[0] + offset, __covirt_vm_end_bytes, 16) == 0)
-                    bb.end_va = address;
-
-                if (bb.end_va) {
-                    out::assertion(bb.start_va, "binary appears to be missing marker '__covirt_vm_start()'");
+        if (!file.is_section_executable(section)) continue;
+        auto content = section.content();
+        // ELF: LIEF section.virtual_address() 已含 imagebase; PE: RVA 需加 imagebase。
+        auto runtime_address = file.is_elf() ? section.virtual_address() : (file.imagebase() + section.virtual_address());
+        size_t scan = 0;
+        while (scan + 16 <= content.size()) {
+            if (std::memcmp(&content[0] + scan, __covirt_vm_start_bytes, 16) == 0) {
+                size_t e = scan + 16;
+                while (e + 16 <= content.size() && std::memcmp(&content[0] + e, __covirt_vm_end_bytes, 16) != 0)
+                    e++;
+                if (e + 16 <= content.size()) {
+                    auto bb = covirt::basic_block{};
+                    bb.start_va = runtime_address + scan + 16;
+                    bb.end_va = runtime_address + e;
+                    auto span = std::span<const uint8_t>(&content[0] + scan + 16, e - scan - 16);
+                    covirt::disasm(span, bb.start_va, [&](uint64_t address, ZydisDisassembledInstruction ins) {
+                        auto off = address - bb.start_va;
+                        bb.push_back({(uint8_t*)span.data() + off, ins});
+                    });
                     basic_blocks.push_back(bb);
-                    bb = {};
+                    scan = e + 16;
+                    continue;
                 }
-
-                if (bb.start_va)
-                    bb.push_back({(uint8_t*)content.data() + offset, ins});
-            });
-
-            out::assertion(!(bb.start_va && !bb.end_va), "binary appears to be missing marker '__covirt_vm_end()'");
+            }
+            scan++;
         }
     }
 

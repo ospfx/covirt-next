@@ -17,7 +17,7 @@ namespace covirt {
             lift_offset = offset_into_lift;
         }
 
-        virtual std::unique_ptr<uint8_t> get_bytes() = 0;
+        virtual std::unique_ptr<uint8_t[]> get_bytes() = 0;
         virtual size_t get_length() = 0;
 
         // this is used to assemble everything that comes before `push, call`

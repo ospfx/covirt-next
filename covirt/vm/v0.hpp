@@ -242,13 +242,6 @@ namespace covirt::vm {
                     // to-do: save r9, r10 before?
                     // to-do: not ideal, this is repetitive
 
-                    create_jump_table_once(a, global_labels["vtable"], global_labels["venter"], global_labels["vexit"], 
-                            global_labels["vpush_imm"], global_labels["vpush_reg"], global_labels["vpop"], global_labels["vread"], global_labels["vwrite"], 
-                            global_labels["vadd"], global_labels["vsub"], global_labels["vxor"], global_labels["vand"], global_labels["vor"], 
-                            global_labels["vcmp"], global_labels["vjmp"], global_labels["vjz"], global_labels["vjnz"], global_labels["vjb"], 
-                            global_labels["vjnb"], global_labels["vjbe"], global_labels["vjnbe"], global_labels["vjl"], global_labels["vjle"],
-                            global_labels["vjnl"], global_labels["vjnle"], global_labels["vcall"], global_labels["vlea"], global_labels["vexenative"]);
-
                     a.push(zasm::x86::r15); // -8
                     a.push(zasm::x86::r14); // -16
                     a.push(zasm::x86::r13); // -24
@@ -266,6 +259,15 @@ namespace covirt::vm {
                     a.push(zasm::x86::rcx); // -120
                     a.push(zasm::x86::rax); // -128
                     a.pushfq(); // -136
+                    // [REGSAVE-REORDER] guest regs saved BEFORE the jump-table fill:
+                    // mba/smc expansions clobber r15/r14/r13/r12/r8/rdi/rbx; saving first
+                    create_jump_table_once(a, global_labels["vtable"], global_labels["venter"], global_labels["vexit"], 
+                            global_labels["vpush_imm"], global_labels["vpush_reg"], global_labels["vpop"], global_labels["vread"], global_labels["vwrite"], 
+                            global_labels["vadd"], global_labels["vsub"], global_labels["vxor"], global_labels["vand"], global_labels["vor"], 
+                            global_labels["vcmp"], global_labels["vjmp"], global_labels["vjz"], global_labels["vjnz"], global_labels["vjb"], 
+                            global_labels["vjnb"], global_labels["vjbe"], global_labels["vjnbe"], global_labels["vjl"], global_labels["vjle"],
+                            global_labels["vjnl"], global_labels["vjnle"], global_labels["vcall"], global_labels["vlea"], global_labels["vexenative"]);
+
 
                     a.lea(vsp, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["vstack"]));
                     a.add(vsp, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["_vsp"]));
@@ -376,7 +378,13 @@ namespace covirt::vm {
 
                     vpopz(0b00, zasm::x86::cl, zasm::x86::byte_ptr<zasm::x86::Gp64>);
                     vpopz(0b01, zasm::x86::cx, zasm::x86::word_ptr<zasm::x86::Gp64>);
-                    vpopz(0b10, zasm::x86::ecx, zasm::x86::dword_ptr<zasm::x86::Gp64>);
+                    // [P6-ZEXT32] 32 位写零扩展: mov ecx,[vsp] 已零扩展 rcx,
+                    // 再以 qword 写 vregs 槽 -> 高 32 位清零(兼容 x86 写 r32 语义)
+                    a.bind(labels[3]);
+                    a.mov(zasm::x86::ecx, zasm::x86::dword_ptr<zasm::x86::Gp64>(vsp));
+                    a.add(vsp, 4);
+                    a.mov(zasm::x86::qword_ptr(zasm::x86::rdx), zasm::x86::rcx);
+                    a.jmp(labels[5]);
                     vpopz(0b11, zasm::x86::rcx, zasm::x86::qword_ptr<zasm::x86::Gp64>);
                     
                     vm_next_instruction(a, labels[5]);
@@ -898,10 +906,29 @@ namespace covirt::vm {
 
                     vm_enter_emitter.revert_effects(a);
 
+                    // [NEST-FIX] stash pre-call vsp offset above the callee frame:
+                    // callee entry rsp after the call below = rsp-8 and its frame grows further
+                    // down, so the stash slot survives any nested VM region inside the callee.
+                    // r10 is caller-saved and ABI-dead across the call.
+                    a.mov(zasm::x86::r10, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["_vsp"]));
+                    a.sub(zasm::x86::rsp, 0x8);
+                    a.mov(zasm::x86::qword_ptr(zasm::x86::rsp), zasm::x86::r10);
+
                     a.call(zasm::x86::r11);
+
+                    // [NEST-FIX] after the callee's ret, rsp points exactly at the stash
+                    // slot (marker_rsp-8): pop it straight off (pop is smc-exempt) and rsp
+                    // lands back on the pre-call guest boundary.
+                    a.pop(zasm::x86::r10);
 
                     // vmenter proc
                     vm_enter_emitter.assemble_effects(a);
+
+                    // [NEST-FIX] re-anchor saved_rsp BEFORE push 17: at this point
+                    // rsp == our own save-area base (guest boundary - 0x200). A nested
+                    // VM region inside the callee stomped the global, so push [saved_rsp]
+                    // below would otherwise store the wrong value into vregs[rsp].
+                    a.mov(zasm::x86::qword_ptr(zasm::x86::rip, global_labels["saved_rsp"]), zasm::x86::rsp);
 
                     a.push(zasm::x86::r15); // -8
                     a.push(zasm::x86::r14); // -16
@@ -921,8 +948,10 @@ namespace covirt::vm {
                     a.push(zasm::x86::rax); // -128
                     a.pushfq(); // -136
 
+                    // [NEST-FIX] restore vsp from the stash instead of the (possibly
+                    // nested-stomped) _vsp global; identical to _vsp when no nesting happened.
                     a.lea(vsp, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["vstack"]));
-                    a.add(vsp, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["_vsp"]));
+                    a.add(vsp, zasm::x86::r10);
 
                     a.mov(vip, zasm::x86::qword_ptr(vsp));
                     a.add(vsp, 8);

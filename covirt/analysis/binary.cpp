@@ -77,7 +77,7 @@ lief_section *covirt::binary::get_section(uint64_t address)
     return std::visit([&](auto&& x) {
         auto sections = x->sections();
         auto it = std::find_if(sections.begin(), sections.end(), [&](lief_section &section) { 
-            auto va_start = x->imagebase() + section.virtual_address();
+            auto va_start = section.virtual_address();
             return address >= va_start && address < va_start + section.size();
         });
         
@@ -94,7 +94,7 @@ void covirt::binary::write_vm_entries(std::vector<covirt::subroutine> &routines,
 {
     auto vm_section = get_section(".covirt0");
     auto section_of_block = get_section(routines[0].start_va);
-    auto base = imagebase() + section_of_block->virtual_address();
+    auto base = is_elf() ? section_of_block->virtual_address() : (imagebase() + section_of_block->virtual_address());
 
     std::vector<uint8_t> content;
     auto cc = section_of_block->content();
@@ -106,7 +106,7 @@ void covirt::binary::write_vm_entries(std::vector<covirt::subroutine> &routines,
 
         auto offset = routine.start_va - base - __covirt_vm_stub_length;
 
-        vm_enter.set_call_offset(base, imagebase() + vm_section->virtual_address(), offset);
+        vm_enter.set_call_offset(base, is_elf() ? vm_section->virtual_address() : (imagebase() + vm_section->virtual_address()), offset);
         vm_enter.set_vm_bytecode_offset(routine.offset_into_lift);
 
         auto vm_enter_bytes = vm_enter.get_bytes();

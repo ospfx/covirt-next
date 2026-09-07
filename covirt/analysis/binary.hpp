@@ -42,6 +42,7 @@ namespace covirt {
         lief_sections_iterator_t sections();
         bool is_section_executable(lief_section &section);
         uint64_t imagebase();
+        bool is_elf() { return generic->format() == LIEF::Binary::FORMATS::ELF; }
         lief_section *get_section(const std::string &name);
         lief_section *get_section(uint64_t address);
         void update();
