@@ -269,7 +269,19 @@ namespace covirt::vm {
                     a.push(zasm::x86::rdi); // -72
                     a.push(zasm::x86::rsi); // -80
                     a.push(zasm::x86::rbp); // -88
-                    a.push(zasm::x86::qword_ptr(zasm::x86::rip, global_labels["saved_rsp"])); // -96
+                    // [BUG-G-FIX] vregs[rsp] slot must hold the TRUE guest rsp at the
+                    // marker point = saved_rsp + 0x200: the stub did sub rsp,0x200
+                    // before venter, but exec_native/vcall/vexit run native code at
+                    // rsp = saved_rsp + 0x200 (revert_effects undoes the stub's sub).
+                    // The old push of [saved_rsp] (= marker_rsp - 0x200) made every
+                    // lifted rsp-relative memory access ([rsp+disp] via push_reg 4 +
+                    // disp) compute marker_rsp-0x200+disp while native code computed
+                    // marker_rsp+disp — 0x200 off (e.g. CeEncode's lea r14,[rsp+0x1f]
+                    // native vs write0 [r4+31] lifted pointed at different slots).
+                    // r9 is already saved at -56 here, safe to use as scratch.
+                    a.mov(zasm::x86::r9, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["saved_rsp"]));
+                    a.add(zasm::x86::r9, 0x200);
+                    a.push(zasm::x86::r9); // -96  ← vregs[rsp] = marker rsp
                     a.push(zasm::x86::rbx); // -104
                     a.push(zasm::x86::rdx); // -112
                     a.push(zasm::x86::rcx); // -120
@@ -997,7 +1009,19 @@ namespace covirt::vm {
                     a.push(zasm::x86::rdi); // -72
                     a.push(zasm::x86::rsi); // -80
                     a.push(zasm::x86::rbp); // -88
-                    a.push(zasm::x86::qword_ptr(zasm::x86::rip, global_labels["saved_rsp"])); // -96
+                    // [BUG-G-FIX] vregs[rsp] slot must hold the TRUE guest rsp at the
+                    // marker point = saved_rsp + 0x200: the stub did sub rsp,0x200
+                    // before venter, but exec_native/vcall/vexit run native code at
+                    // rsp = saved_rsp + 0x200 (revert_effects undoes the stub's sub).
+                    // The old push of [saved_rsp] (= marker_rsp - 0x200) made every
+                    // lifted rsp-relative memory access ([rsp+disp] via push_reg 4 +
+                    // disp) compute marker_rsp-0x200+disp while native code computed
+                    // marker_rsp+disp — 0x200 off (e.g. CeEncode's lea r14,[rsp+0x1f]
+                    // native vs write0 [r4+31] lifted pointed at different slots).
+                    // r9 is already saved at -56 here, safe to use as scratch.
+                    a.mov(zasm::x86::r9, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["saved_rsp"]));
+                    a.add(zasm::x86::r9, 0x200);
+                    a.push(zasm::x86::r9); // -96  ← vregs[rsp] = marker rsp
                     a.push(zasm::x86::rbx); // -104
                     a.push(zasm::x86::rdx); // -112
                     a.push(zasm::x86::rcx); // -120
@@ -1110,7 +1134,19 @@ namespace covirt::vm {
                     a.push(zasm::x86::rdi); // -72
                     a.push(zasm::x86::rsi); // -80
                     a.push(zasm::x86::rbp); // -88
-                    a.push(zasm::x86::qword_ptr(zasm::x86::rip, global_labels["saved_rsp"])); // -96
+                    // [BUG-G-FIX] vregs[rsp] slot must hold the TRUE guest rsp at the
+                    // marker point = saved_rsp + 0x200: the stub did sub rsp,0x200
+                    // before venter, but exec_native/vcall/vexit run native code at
+                    // rsp = saved_rsp + 0x200 (revert_effects undoes the stub's sub).
+                    // The old push of [saved_rsp] (= marker_rsp - 0x200) made every
+                    // lifted rsp-relative memory access ([rsp+disp] via push_reg 4 +
+                    // disp) compute marker_rsp-0x200+disp while native code computed
+                    // marker_rsp+disp — 0x200 off (e.g. CeEncode's lea r14,[rsp+0x1f]
+                    // native vs write0 [r4+31] lifted pointed at different slots).
+                    // r9 is already saved at -56 here, safe to use as scratch.
+                    a.mov(zasm::x86::r9, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["saved_rsp"]));
+                    a.add(zasm::x86::r9, 0x200);
+                    a.push(zasm::x86::r9); // -96  ← vregs[rsp] = marker rsp
                     a.push(zasm::x86::rbx); // -104
                     a.push(zasm::x86::rdx); // -112
                     a.push(zasm::x86::rcx); // -120
