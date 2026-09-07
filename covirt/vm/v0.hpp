@@ -981,73 +981,62 @@ namespace covirt::vm {
 
                     vm_enter_emitter.revert_effects(a);
 
-                    // [NEST-FIX] stash pre-call vsp offset above the callee frame:
-                    // callee entry rsp after the call below = rsp-8 and its frame grows further
-                    // down, so the stash slot survives any nested VM region inside the callee.
-                    // r10 is caller-saved and ABI-dead across the call.
-                    a.mov(zasm::x86::r10, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["_vsp"]));
-                    a.sub(zasm::x86::rsp, 0x8);
-                    a.mov(zasm::x86::qword_ptr(zasm::x86::rsp), zasm::x86::r10);
-
+                    // [BUG-M v2] No pre-call stash: rsp stays at E through the call;
+                    // re-entry restores vsp from the _vsp global (exec_native-style).
+                    // (The old [NEST-FIX] stash clobbered guest r10 with the _vsp offset
+                    // and re-pushed it into vregs[r10] — Md5Compress keeps b in r10
+                    // across Rol32 vcalls, so r10 became 0x736=vsp offset instead of
+                    // b=0xefcdab89, corrupting the MD5 rotate.)
                     a.call(zasm::x86::r11);
 
-                    // [NEST-FIX] after the callee's ret, rsp points exactly at the stash
-                    // slot (marker_rsp-8): pop it straight off (pop is smc-exempt) and rsp
-                    // lands back on the pre-call guest boundary.
-                    a.pop(zasm::x86::r10);
+                    // ===== vcall re-entry: restore VM state + re-save guest regs =====
+                    // (BUG-M v2 rewrite) The old [NEST-FIX] stash clobbered guest r10
+                    // with the _vsp offset and re-pushed it into vregs[r10]; Md5Compress
+                    // keeps b in r10 across Rol32 vcalls -> r10 became 0x736 (vsp offset)
+                    // instead of b=0xefcdab89, corrupting the MD5 rotate. exec_native
+                    // already restores vsp from the _vsp GLOBAL with no stash and passes;
+                    // nested VM regions save/restore _vsp themselves via venter/vexit.
+                    // Caller's `sub rsp,0x8` above balanced the ABI; rsp is at E here.
+                    vm_enter_emitter.assemble_effects(a); // rsp = saved_rsp (E-0x200)
 
-                    // vmenter proc
-                    vm_enter_emitter.assemble_effects(a);
-
-                    // [NEST-FIX] re-anchor saved_rsp BEFORE push 17: at this point
-                    // rsp == our own save-area base (guest boundary - 0x200). A nested
-                    // VM region inside the callee stomped the global, so push [saved_rsp]
-                    // below would otherwise store the wrong value into vregs[rsp].
+                    // [NEST-FIX] re-anchor saved_rsp: a nested VM region inside the
+                    // callee stomped the global; our save area base is rsp right now.
                     a.mov(zasm::x86::qword_ptr(zasm::x86::rip, global_labels["saved_rsp"]), zasm::x86::rsp);
 
                     a.push(zasm::x86::r15); // -8
                     a.push(zasm::x86::r14); // -16
                     a.push(zasm::x86::r13); // -24
                     a.push(zasm::x86::r12); // -32
-                    // [VCALL-R11-PRESERVE] r11 slot must hold the GUEST r11, not the
-                    // call target: r11 was clobbered with [retaddr]+disp for `call r11`
-                    // and the callee may further clobber it (caller-saved). Pushing the
-                    // host r11 here would store the target address into vregs[r11],
-                    // corrupting any guest value kept in r11 across the vcall.
-                    // Md5Compress keeps kMd5T base in r11 across Rol32 vcalls ->
-                    // kMd5T[i] read from target address -> MD5 wrong -> MgSign FAIL.
-                    // Guest r11 lives at [saved_rsp-40] = [rsp-8] now (r15..r12 pushed).
+                    // [VCALL-R11-PRESERVE] r11 slot must hold GUEST r11: r11 held the call
+                    // target ([retaddr]+disp) and was consumed by `call r11`; callee may
+                    // further clobber it (caller-saved). Guest r11 at [saved_rsp-40].
+                    // rsp == saved_rsp-32 now (r15..r12 pushed) => [rsp-8] == [saved_rsp-40].
                     a.mov(zasm::x86::r11, zasm::x86::qword_ptr(zasm::x86::rsp, -8));
                     a.push(zasm::x86::r11); // -40  ← guest r11
-                    a.push(zasm::x86::r10); // -48
+                    // [BUG-M-FIX] r10 slot must hold GUEST r10 (b in Md5Compress): host r10
+                    // may have been clobbered by callee. Guest r10 at [saved_rsp-48] = [rsp-8].
+                    a.mov(zasm::x86::r10, zasm::x86::qword_ptr(zasm::x86::rsp, -8));
+                    a.push(zasm::x86::r10); // -48  ← guest r10
                     a.push(zasm::x86::r9); // -56
                     a.push(zasm::x86::r8); // -64
                     a.push(zasm::x86::rdi); // -72
                     a.push(zasm::x86::rsi); // -80
                     a.push(zasm::x86::rbp); // -88
-                    // [BUG-G-FIX] vregs[rsp] slot must hold the TRUE guest rsp at the
-                    // marker point = saved_rsp + 0x200: the stub did sub rsp,0x200
-                    // before venter, but exec_native/vcall/vexit run native code at
-                    // rsp = saved_rsp + 0x200 (revert_effects undoes the stub's sub).
-                    // The old push of [saved_rsp] (= marker_rsp - 0x200) made every
-                    // lifted rsp-relative memory access ([rsp+disp] via push_reg 4 +
-                    // disp) compute marker_rsp-0x200+disp while native code computed
-                    // marker_rsp+disp — 0x200 off (e.g. CeEncode's lea r14,[rsp+0x1f]
-                    // native vs write0 [r4+31] lifted pointed at different slots).
-                    // r9 is already saved at -56 here, safe to use as scratch.
+                    // [BUG-G-FIX] vregs[rsp] slot holds marker-point guest rsp = E:
+                    // revert_effects above returned rsp to saved_rsp = E-0x200; native
+                    // code runs at E. Store saved_rsp+0x200 (=E) in the rsp slot.
                     a.mov(zasm::x86::r9, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["saved_rsp"]));
                     a.add(zasm::x86::r9, 0x200);
-                    a.push(zasm::x86::r9); // -96  ← vregs[rsp] = marker rsp
+                    a.push(zasm::x86::r9); // -96  ← vregs[rsp] = E
                     a.push(zasm::x86::rbx); // -104
                     a.push(zasm::x86::rdx); // -112
                     a.push(zasm::x86::rcx); // -120
                     a.push(zasm::x86::rax); // -128
                     a.pushfq(); // -136
 
-                    // [NEST-FIX] restore vsp from the stash instead of the (possibly
-                    // nested-stomped) _vsp global; identical to _vsp when no nesting happened.
+                    // restore vsp from the _vsp global (exec_native-style)
                     a.lea(vsp, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["vstack"]));
-                    a.add(vsp, zasm::x86::r10);
+                    a.add(vsp, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["_vsp"]));
 
                     a.mov(vip, zasm::x86::qword_ptr(vsp));
                     a.add(vsp, 8);
