@@ -217,6 +217,10 @@ void covirt::vm::debug::dump_v0(lift_result &result)
             std::println("{:<26} | ", std::format("cmp{}", suffix[bytes[i] >> 6]));
             expression_stack.push(out::purple(std::format("flags", r++)));
             break;
+        case int(test):
+            std::println("{:<26} | ", std::format("test{}", suffix[bytes[i] >> 6]));
+            expression_stack.push(out::purple(std::format("flags", r++)));
+            break;
         case int(jz) ... int(jnle):
             {
                 auto a = expression_stack.top(); expression_stack.pop();

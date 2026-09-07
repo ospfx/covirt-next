@@ -9,7 +9,7 @@
 
 namespace covirt::vm {
     enum class v0_op : uint8_t {
-        vm_enter, vm_exit, push_imm, push_reg, pop, read, write, add, sub, bxor, band, bor, cmp, jmp, jz, jnz, jb, jnb, jbe, jnbe, jl, jle, jnl, jnle, call, lea, execute_native
+        vm_enter, vm_exit, push_imm, push_reg, pop, read, write, add, sub, bxor, band, bor, cmp, jmp, jz, jnz, jb, jnb, jbe, jnbe, jl, jle, jnl, jnle, call, lea, execute_native, test
     };
 
     class v0_emitter : public generic_emitter {
@@ -33,6 +33,7 @@ namespace covirt::vm {
         LAZY_EMIT(band);
         LAZY_EMIT(bor);
         LAZY_EMIT(cmp);
+        LAZY_EMIT(test);
         LAZY_EMIT(lea);
         LAZY_EMIT(call);
     #undef LAZY_EMIT
@@ -102,6 +103,19 @@ namespace covirt::vm {
                     push_operand(dst);
                     push_operand(src, dst.size);
                     e.cmp(dst.size);
+                    return true; \
+                }
+            },
+            {
+                // [BUG-E-FIX] ZYDIS_MNEMONIC_TEST mirrors CMP: push dst, push src,
+                // vtest pops both + pushes real 2-byte flags word. Previously test
+                // went native (exec_native) which pushes NO flags, yet the following
+                // vjcc pops 2 bytes -> garbage branch + permanent +2 vsp drift
+                // (vsp climbs past vstack top into retaddr/vtable globals).
+                ZYDIS_MNEMONIC_TEST, [&](covirt::zydis_operand &dst, covirt::zydis_operand &src) {
+                    push_operand(dst);
+                    push_operand(src, dst.size);
+                    e.test(dst.size);
                     return true; \
                 }
             },
@@ -185,6 +199,7 @@ namespace covirt::vm {
             {"vand", {}},
             {"vor", {}},
             {"vcmp", {}},
+            {"vtest", {}},
             {"vjmp", {}},
             {"vjz", {}},
             {"vjnz", {}},
@@ -266,7 +281,7 @@ namespace covirt::vm {
                             global_labels["vadd"], global_labels["vsub"], global_labels["vxor"], global_labels["vand"], global_labels["vor"], 
                             global_labels["vcmp"], global_labels["vjmp"], global_labels["vjz"], global_labels["vjnz"], global_labels["vjb"], 
                             global_labels["vjnb"], global_labels["vjbe"], global_labels["vjnbe"], global_labels["vjl"], global_labels["vjle"],
-                            global_labels["vjnl"], global_labels["vjnle"], global_labels["vcall"], global_labels["vlea"], global_labels["vexenative"]);
+                            global_labels["vjnl"], global_labels["vjnle"], global_labels["vcall"], global_labels["vlea"], global_labels["vexenative"], global_labels["vtest"]);
 
 
                     a.lea(vsp, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["vstack"]));
@@ -598,6 +613,41 @@ namespace covirt::vm {
                     };
 
                     get_size_from_opcode(a, global_labels["vcmp"]);
+
+                    create_jump_table_once(a, labels[0], labels[1], labels[2], labels[3], labels[4]);
+                    jump_using_table(a, labels[0]);
+
+                    varith(0b00, zasm::x86::cl, zasm::x86::dl, zasm::x86::byte_ptr<zasm::x86::Gp64>);
+                    varith(0b01, zasm::x86::cx, zasm::x86::dx, zasm::x86::word_ptr<zasm::x86::Gp64>);
+                    varith(0b10, zasm::x86::ecx, zasm::x86::edx, zasm::x86::dword_ptr<zasm::x86::Gp64>);
+                    varith(0b11, zasm::x86::rcx, zasm::x86::rdx, zasm::x86::qword_ptr<zasm::x86::Gp64>);
+
+                    vm_next_instruction(a, labels[5]);
+                }
+            },
+            {
+                // [BUG-E-FIX] vtest mirrors vcmp: pop 2 operands, compute flags,
+                // push real 2-byte flags word for the following vjcc.
+                // (test used to go native via exec_native -> no flags pushed ->
+                //  vjcc popped garbage + permanent +2 vsp drift)
+                uint8_t(v0_op::test), [&](zasm::x86::Assembler& a) {
+                    auto labels = [&]{ std::array<zasm::Label, 6> res; for (auto&x:res) x = a.createLabel(); return res; }();
+
+                    auto varith = [&]<typename T>(int size, zasm::x86::Gp v0, zasm::x86::Gp v1, T ptr) {
+                        a.bind(labels[1 + size]);
+                        a.mov(v0, ptr(std::forward<zasm::x86::Gp64>(vsp)));
+                        a.add(vsp, 1 << size);
+                        a.mov(v1, ptr(std::forward<zasm::x86::Gp64>(vsp)));
+                        a.test(v1, v0);
+                        a.pushfq();
+                        a.pop(v0.r64());
+                        a.add(vsp, 1 << size);
+                        a.sub(vsp, 2);
+                        a.mov(zasm::x86::word_ptr(std::forward<zasm::x86::Gp64>(vsp)), v0.r16());
+                        a.jmp(labels[5]);
+                    };
+
+                    get_size_from_opcode(a, global_labels["vtest"]);
 
                     create_jump_table_once(a, labels[0], labels[1], labels[2], labels[3], labels[4]);
                     jump_using_table(a, labels[0]);
