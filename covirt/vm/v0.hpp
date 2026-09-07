@@ -1009,7 +1009,16 @@ namespace covirt::vm {
                     a.push(zasm::x86::r14); // -16
                     a.push(zasm::x86::r13); // -24
                     a.push(zasm::x86::r12); // -32
-                    a.push(zasm::x86::r11); // -40
+                    // [VCALL-R11-PRESERVE] r11 slot must hold the GUEST r11, not the
+                    // call target: r11 was clobbered with [retaddr]+disp for `call r11`
+                    // and the callee may further clobber it (caller-saved). Pushing the
+                    // host r11 here would store the target address into vregs[r11],
+                    // corrupting any guest value kept in r11 across the vcall.
+                    // Md5Compress keeps kMd5T base in r11 across Rol32 vcalls ->
+                    // kMd5T[i] read from target address -> MD5 wrong -> MgSign FAIL.
+                    // Guest r11 lives at [saved_rsp-40] = [rsp-8] now (r15..r12 pushed).
+                    a.mov(zasm::x86::r11, zasm::x86::qword_ptr(zasm::x86::rsp, -8));
+                    a.push(zasm::x86::r11); // -40  ← guest r11
                     a.push(zasm::x86::r10); // -48
                     a.push(zasm::x86::r9); // -56
                     a.push(zasm::x86::r8); // -64
