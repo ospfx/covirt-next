@@ -29,7 +29,29 @@ int covirt::zydis_operand::register_index(bool use_index)
     out::assertion(reg != ZYDIS_REGISTER_NONE, "zydis_operand isn't a register");
 
     switch (reg) {
-    case ZYDIS_REGISTER_AL ... ZYDIS_REGISTER_R15B: return reg - ZYDIS_REGISTER_AL;
+    // [BUG-H-FIX] Zydis GPR8 enum order is AL,CL,DL,BL,AH,CH,DH,BH,SPL,BPL,SIL,DIL,
+    // R8B..R15B — AH..BH sit between BL and SPL, so `reg - ZYDIS_REGISTER_AL` maps
+    // SPL/BPL/SIL/DIL/R8B..R15B onto the WRONG vreg slots (SIL->10 instead of 6, etc).
+    // 8-bit regs must map to the physical 64-bit GPR index (AL=rax=0, SPL=rsp=4,
+    // BPL=rbp=5, SIL=rsi=6, DIL=rdi=7, R8B=8..R15B=15). AH/CH/DH/BH have no separate
+    // vreg slot; keep legacy `reg-AL` mapping (4/5/6/7) for compatibility.
+    case ZYDIS_REGISTER_AL: return 0;
+    case ZYDIS_REGISTER_CL: return 1;
+    case ZYDIS_REGISTER_DL: return 2;
+    case ZYDIS_REGISTER_BL: return 3;
+    case ZYDIS_REGISTER_SPL: return 4;
+    case ZYDIS_REGISTER_BPL: return 5;
+    case ZYDIS_REGISTER_SIL: return 6;
+    case ZYDIS_REGISTER_DIL: return 7;
+    case ZYDIS_REGISTER_R8B: return 8;
+    case ZYDIS_REGISTER_R9B: return 9;
+    case ZYDIS_REGISTER_R10B: return 10;
+    case ZYDIS_REGISTER_R11B: return 11;
+    case ZYDIS_REGISTER_R12B: return 12;
+    case ZYDIS_REGISTER_R13B: return 13;
+    case ZYDIS_REGISTER_R14B: return 14;
+    case ZYDIS_REGISTER_R15B: return 15;
+    case ZYDIS_REGISTER_AH ... ZYDIS_REGISTER_BH: return reg - ZYDIS_REGISTER_AL;
     case ZYDIS_REGISTER_AX ... ZYDIS_REGISTER_R15W: return reg - ZYDIS_REGISTER_AX;
     case ZYDIS_REGISTER_EAX ... ZYDIS_REGISTER_R15D: return reg - ZYDIS_REGISTER_EAX;
     case ZYDIS_REGISTER_RAX ... ZYDIS_REGISTER_R15: return reg - ZYDIS_REGISTER_RAX;
