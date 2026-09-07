@@ -959,6 +959,14 @@ namespace covirt::vm {
                     a.add(vsp, 8);
                     a.mov(zasm::x86::r11, zasm::x86::qword_ptr(vsp));
                     a.mov(zasm::x86::qword_ptr(zasm::x86::rip, global_labels["retaddr"]), zasm::x86::r11);
+                    // [P7-VCALL-BALANCE] pop the retaddr slot: vcall pushed 16 bytes
+                    // (retaddr@[vsp-8] + vip@[vsp-16]) but the re-entry only popped the vip
+                    // slot, leaving vsp 8 below its pre-call level FOREVER -> every vcall
+                    // permanently drained 8 bytes of the vstack; the selftest's hundreds of
+                    // calls underflowed it (_vsp=-11, vip=0xffffff, SIGSEGV at opcode fetch).
+                    // exec_native was already balanced (push vip, pop vip); this makes vcall
+                    // balanced too (push 16, pop 16).
+                    a.add(vsp, 8);
 
                     vm_next_instruction(a);
                 }
