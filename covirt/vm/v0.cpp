@@ -65,6 +65,7 @@ void covirt::vm::v0_vm::finalize(zasm::x86::Assembler& a)
     a.bind(global_labels["_vip"]); a.dq(0);
     a.bind(global_labels["vstack"]); a.db(0, stack_size);
     a.bind(global_labels["retaddr"]); a.dq(0);
+    a.bind(global_labels["vflags"]); a.dq(0);
 
     a.bind(global_labels["vtable"]);
     a.dq(0, 8);

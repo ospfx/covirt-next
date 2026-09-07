@@ -213,7 +213,8 @@ namespace covirt::vm {
             {"vjnle", {}},
             {"vcall", {}},
             {"vlea", {}},
-            {"vexenative", {}}
+            {"vexenative", {}},
+            {"vflags", {}}
         };
 
         default_vm_enter vm_enter_emitter;
@@ -470,6 +471,9 @@ namespace covirt::vm {
                         a.mov(v1, ptr(std::forward<zasm::x86::Gp64>(vsp)));
                         a.add(v0, v1);
                         a.mov(ptr(std::forward<zasm::x86::Gp64>(vsp)), v0);
+                        a.pushfq();
+                        a.pop(v0.r64());
+                        a.mov(zasm::x86::word_ptr(zasm::x86::rip, global_labels["vflags"]), v0.r16());
                         a.jmp(labels[5]);
                     };
 
@@ -497,6 +501,9 @@ namespace covirt::vm {
                         a.mov(v1, ptr(std::forward<zasm::x86::Gp64>(vsp)));
                         a.sub(v1, v0);
                         a.mov(ptr(std::forward<zasm::x86::Gp64>(vsp)), v1);
+                        a.pushfq();
+                        a.pop(v0.r64());
+                        a.mov(zasm::x86::word_ptr(zasm::x86::rip, global_labels["vflags"]), v0.r16());
                         a.jmp(labels[5]);
                     };
 
@@ -524,6 +531,9 @@ namespace covirt::vm {
                         a.mov(v1, ptr(std::forward<zasm::x86::Gp64>(vsp)));
                         a.xor_(v1, v0);
                         a.mov(ptr(std::forward<zasm::x86::Gp64>(vsp)), v1);
+                        a.pushfq();
+                        a.pop(v0.r64());
+                        a.mov(zasm::x86::word_ptr(zasm::x86::rip, global_labels["vflags"]), v0.r16());
                         a.jmp(labels[5]);
                     };
 
@@ -551,6 +561,9 @@ namespace covirt::vm {
                         a.mov(v1, ptr(std::forward<zasm::x86::Gp64>(vsp)));
                         a.and_(v1, v0);
                         a.mov(ptr(std::forward<zasm::x86::Gp64>(vsp)), v1);
+                        a.pushfq();
+                        a.pop(v0.r64());
+                        a.mov(zasm::x86::word_ptr(zasm::x86::rip, global_labels["vflags"]), v0.r16());
                         a.jmp(labels[5]);
                     };
 
@@ -578,6 +591,9 @@ namespace covirt::vm {
                         a.mov(v1, ptr(std::forward<zasm::x86::Gp64>(vsp)));
                         a.or_(v1, v0);
                         a.mov(ptr(std::forward<zasm::x86::Gp64>(vsp)), v1);
+                        a.pushfq();
+                        a.pop(v0.r64());
+                        a.mov(zasm::x86::word_ptr(zasm::x86::rip, global_labels["vflags"]), v0.r16());
                         a.jmp(labels[5]);
                     };
 
@@ -607,8 +623,7 @@ namespace covirt::vm {
                         a.pushfq();
                         a.pop(v0.r64());
                         a.add(vsp, 1 << size);
-                        a.sub(vsp, 2);
-                        a.mov(zasm::x86::word_ptr(std::forward<zasm::x86::Gp64>(vsp)), v0.r16());
+                        a.mov(zasm::x86::word_ptr(zasm::x86::rip, global_labels["vflags"]), v0.r16());
                         a.jmp(labels[5]);
                     };
 
@@ -627,7 +642,7 @@ namespace covirt::vm {
             },
             {
                 // [BUG-E-FIX] vtest mirrors vcmp: pop 2 operands, compute flags,
-                // push real 2-byte flags word for the following vjcc.
+                // store real flags word to vflags global for the following vjcc.
                 // (test used to go native via exec_native -> no flags pushed ->
                 //  vjcc popped garbage + permanent +2 vsp drift)
                 uint8_t(v0_op::test), [&](zasm::x86::Assembler& a) {
@@ -642,8 +657,7 @@ namespace covirt::vm {
                         a.pushfq();
                         a.pop(v0.r64());
                         a.add(vsp, 1 << size);
-                        a.sub(vsp, 2);
-                        a.mov(zasm::x86::word_ptr(std::forward<zasm::x86::Gp64>(vsp)), v0.r16());
+                        a.mov(zasm::x86::word_ptr(zasm::x86::rip, global_labels["vflags"]), v0.r16());
                         a.jmp(labels[5]);
                     };
 
@@ -676,7 +690,7 @@ namespace covirt::vm {
 
                     a.bind(global_labels["vjz"]);
                     a.add(vip, 1);
-                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(vsp)); // ZF = 1?
+                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(zasm::x86::rip, global_labels["vflags"])); // ZF = 1?
                     a.and_(zasm::x86::rdx, 0x0040);
                     a.test(zasm::x86::rdx, zasm::x86::rdx);
                     a.jnz(truth);
@@ -688,7 +702,6 @@ namespace covirt::vm {
                     a.lea(vip, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["vcode"]));
                     a.add(vip, zasm::x86::rcx);
                     a.bind(vnext);
-                    a.add(vsp, 2);
                     vm_next_instruction(a);
                 }
             },
@@ -698,7 +711,7 @@ namespace covirt::vm {
 
                     a.bind(global_labels["vjnz"]);
                     a.add(vip, 1);
-                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(vsp)); // ZF = 0?
+                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(zasm::x86::rip, global_labels["vflags"])); // ZF = 0?
                     a.and_(zasm::x86::rdx, 0x0040);
                     a.test(zasm::x86::rdx, zasm::x86::rdx);
                     a.jz(truth);
@@ -710,7 +723,6 @@ namespace covirt::vm {
                     a.lea(vip, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["vcode"]));
                     a.add(vip, zasm::x86::rcx);
                     a.bind(vnext);
-                    a.add(vsp, 2);
                     vm_next_instruction(a);
                 }
             },
@@ -720,7 +732,7 @@ namespace covirt::vm {
 
                     a.bind(global_labels["vjb"]);
                     a.add(vip, 1);
-                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(vsp)); // CF = 1?
+                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(zasm::x86::rip, global_labels["vflags"])); // CF = 1?
                     a.and_(zasm::x86::rdx, 0x0001);
                     a.test(zasm::x86::rdx, zasm::x86::rdx);
                     a.jnz(truth);
@@ -732,7 +744,6 @@ namespace covirt::vm {
                     a.lea(vip, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["vcode"]));
                     a.add(vip, zasm::x86::rcx);
                     a.bind(vnext);
-                    a.add(vsp, 2);
                     vm_next_instruction(a);
                 }
             },
@@ -742,7 +753,7 @@ namespace covirt::vm {
 
                     a.bind(global_labels["vjnb"]);
                     a.add(vip, 1);
-                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(vsp)); // CF = 0?
+                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(zasm::x86::rip, global_labels["vflags"])); // CF = 0?
                     a.and_(zasm::x86::rdx, 0x0001);
                     a.test(zasm::x86::rdx, zasm::x86::rdx);
                     a.jz(truth);
@@ -754,7 +765,6 @@ namespace covirt::vm {
                     a.lea(vip, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["vcode"]));
                     a.add(vip, zasm::x86::rcx);
                     a.bind(vnext);
-                    a.add(vsp, 2);
                     vm_next_instruction(a);
                 }
             },
@@ -764,11 +774,11 @@ namespace covirt::vm {
 
                     a.bind(global_labels["vjbe"]);
                     a.add(vip, 1);
-                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(vsp)); // CF = 1?
+                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(zasm::x86::rip, global_labels["vflags"])); // CF = 1?
                     a.and_(zasm::x86::rdx, 0x0001);
                     a.test(zasm::x86::rdx, zasm::x86::rdx);
                     a.jnz(truth);
-                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(vsp)); // or ZF = 1?
+                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(zasm::x86::rip, global_labels["vflags"])); // or ZF = 1?
                     a.and_(zasm::x86::rdx, 0x0040);
                     a.test(zasm::x86::rdx, zasm::x86::rdx);
                     a.jnz(truth);
@@ -780,7 +790,6 @@ namespace covirt::vm {
                     a.lea(vip, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["vcode"]));
                     a.add(vip, zasm::x86::rcx);
                     a.bind(vnext);
-                    a.add(vsp, 2);
                     vm_next_instruction(a);
                 }
             },
@@ -790,11 +799,11 @@ namespace covirt::vm {
 
                     a.bind(global_labels["vjnbe"]);
                     a.add(vip, 1);
-                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(vsp)); // CF = 0?
+                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(zasm::x86::rip, global_labels["vflags"])); // CF = 0?
                     a.and_(zasm::x86::rdx, 0x0001);
                     a.test(zasm::x86::rdx, zasm::x86::rdx);
                     a.jnz(ntruth);
-                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(vsp)); // and ZF = 0?
+                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(zasm::x86::rip, global_labels["vflags"])); // and ZF = 0?
                     a.and_(zasm::x86::rdx, 0x0040);
                     a.test(zasm::x86::rdx, zasm::x86::rdx);
                     a.jnz(ntruth);
@@ -808,7 +817,6 @@ namespace covirt::vm {
                     a.lea(vip, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["vcode"]));
                     a.add(vip, zasm::x86::rcx);
                     a.bind(vnext);
-                    a.add(vsp, 2);
                     vm_next_instruction(a);
                 }
             },
@@ -818,7 +826,7 @@ namespace covirt::vm {
 
                     a.bind(global_labels["vjl"]);
                     a.add(vip, 1);
-                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(vsp)); // or SF != OF?
+                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(zasm::x86::rip, global_labels["vflags"])); // or SF != OF?
                     a.and_(zasm::x86::rdx, 0x0880);
                     a.popcnt(zasm::x86::rdx, zasm::x86::rdx);
                     a.cmp(zasm::x86::rdx, 1);
@@ -831,7 +839,6 @@ namespace covirt::vm {
                     a.lea(vip, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["vcode"]));
                     a.add(vip, zasm::x86::rcx);
                     a.bind(vnext);
-                    a.add(vsp, 2);
                     vm_next_instruction(a);
                 }
             },
@@ -841,11 +848,11 @@ namespace covirt::vm {
 
                     a.bind(global_labels["vjle"]);
                     a.add(vip, 1);
-                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(vsp)); // ZF = 1?
+                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(zasm::x86::rip, global_labels["vflags"])); // ZF = 1?
                     a.and_(zasm::x86::rdx, 0x0040);
                     a.test(zasm::x86::rdx, zasm::x86::rdx);
                     a.jnz(truth);
-                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(vsp)); // or SF != OF?
+                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(zasm::x86::rip, global_labels["vflags"])); // or SF != OF?
                     a.and_(zasm::x86::rdx, 0x0880);
                     a.popcnt(zasm::x86::rdx, zasm::x86::rdx);
                     a.cmp(zasm::x86::rdx, 1);
@@ -858,7 +865,6 @@ namespace covirt::vm {
                     a.lea(vip, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["vcode"]));
                     a.add(vip, zasm::x86::rcx);
                     a.bind(vnext);
-                    a.add(vsp, 2);
                     vm_next_instruction(a);
                 }
             },
@@ -868,7 +874,7 @@ namespace covirt::vm {
 
                     a.bind(global_labels["vjnl"]);
                     a.add(vip, 1);
-                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(vsp)); // or SF == OF?
+                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(zasm::x86::rip, global_labels["vflags"])); // or SF == OF?
                     a.and_(zasm::x86::rdx, 0x0880);
                     a.popcnt(zasm::x86::rdx, zasm::x86::rdx);
                     a.cmp(zasm::x86::rdx, 1);
@@ -881,7 +887,6 @@ namespace covirt::vm {
                     a.lea(vip, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["vcode"]));
                     a.add(vip, zasm::x86::rcx);
                     a.bind(vnext);
-                    a.add(vsp, 2);
                     vm_next_instruction(a);
                 }
             },
@@ -891,11 +896,11 @@ namespace covirt::vm {
 
                     a.bind(global_labels["vjnle"]);
                     a.add(vip, 1);
-                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(vsp)); // ZF = 0?
+                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(zasm::x86::rip, global_labels["vflags"])); // ZF = 0?
                     a.and_(zasm::x86::rdx, 0x0040);
                     a.test(zasm::x86::rdx, zasm::x86::rdx);
                     a.jnz(ntruth);
-                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(vsp)); // and SF == OF?
+                    a.movzx(zasm::x86::rdx, zasm::x86::word_ptr(zasm::x86::rip, global_labels["vflags"])); // and SF == OF?
                     a.and_(zasm::x86::rdx, 0x0880);
                     a.popcnt(zasm::x86::rdx, zasm::x86::rdx);
                     a.cmp(zasm::x86::rdx, 1);
@@ -910,7 +915,6 @@ namespace covirt::vm {
                     a.lea(vip, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["vcode"]));
                     a.add(vip, zasm::x86::rcx);
                     a.bind(vnext);
-                    a.add(vsp, 2);
                     vm_next_instruction(a);
                 }
             },
