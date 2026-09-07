@@ -5,9 +5,25 @@
 
 void covirt::vm::v0_lifter::push_address(covirt::zydis_operand &operand)
 {
+    // [BUG-I-FIX] SIB addressing: push base + index*scale + disp.
+    // Old code pushed only base + disp, silently DROPPING the index register and
+    // scale — every `[rbp+rdx*4+disp]`-style access read [base+disp] instead of
+    // [base + index*scale + disp]. Md5Compress indexes kMd5S[i]/kMd5T[i]/m[g] via
+    // rbp/r11/rsp + rdx*4 -> all loads hit element 0 -> wrong MD5 -> MgSign FAIL.
+    // vcode has no shl/mul; emulate index*scale by adding index `scale` times.
+    // Zydis mem.scale stores the raw multiplier (1,2,4,8) — verified on artifact:
+    // [rbp+rdx*4] produced 16 adds with `1<<scale` (scale field==4) => wrong;
+    // loop exactly `scale` times gives 4 adds. scale<=8 => <=8 adds.
     e.push_reg(8, uint8_t(operand.register_index()))
      .push_imm(8, uint64_t(operand.as_memory().disp.value))
      .add(8);
+    if (operand.as_memory().index != ZYDIS_REGISTER_NONE) {
+        const unsigned scale = operand.as_memory().scale;
+        for (unsigned k = 0; k < scale; ++k) {
+            e.push_reg(8, uint8_t(operand.register_index(true)))
+             .add(8);
+        }
+    }
 }
 
 void covirt::vm::v0_lifter::push_operand(covirt::zydis_operand &operand, std::optional<int> override_size)
