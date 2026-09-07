@@ -966,7 +966,14 @@ namespace covirt::vm {
                     a.pop(zasm::x86::r8);
                     a.pop(zasm::x86::r9);
                     a.pop(zasm::x86::r10);
-                    a.pop(zasm::x86::r12); // r11
+                    // [VCALL-R11-INTENT] r11 must NOT be restored here: it holds the
+                    // native call target (r11=[retaddr]+disp computed above) consumed
+                    // by `call r11` AFTER this pop sequence. Restoring r11 here would
+                    // clobber the target with guest r11 -> call garbage (observed:
+                    // guest r11=0x320 -> call 0x320 -> SIGSEGV). Guest r11 is
+                    // deliberately sacrificed (caller-saved; native callee may clobber
+                    // it anyway). vexit's pop r11;pop r12 stays correct.
+                    a.pop(zasm::x86::r12);
                     a.pop(zasm::x86::r12);
                     a.pop(zasm::x86::r13);
                     a.pop(zasm::x86::r14);
@@ -1109,7 +1116,12 @@ namespace covirt::vm {
                     a.pop(zasm::x86::r8);
                     a.pop(zasm::x86::r9);
                     a.pop(zasm::x86::r10);
-                    a.pop(zasm::x86::r12); // r11
+                    // [BUG-J-FIX] restore r11 slot into r11 (was popped into r12 and
+                    // overwritten -> guest r11 lost after every vcall/exec_native).
+                    // vexit had it right (pop r11; pop r12); vcall/exec_native
+                    // mirrored it wrong. Md5Compress keeps kMd5T base in r11 across
+                    // exec_native[lea eax] -> base garbage -> kMd5T[i] wrong -> MD5 FAIL.
+                    a.pop(zasm::x86::r11);
                     a.pop(zasm::x86::r12);
                     a.pop(zasm::x86::r13);
                     a.pop(zasm::x86::r14);
