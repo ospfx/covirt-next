@@ -380,8 +380,10 @@ namespace covirt::vm {
                     vpopz(0b01, zasm::x86::cx, zasm::x86::word_ptr<zasm::x86::Gp64>);
                     // [P6-ZEXT32] 32 位写零扩展: mov ecx,[vsp] 已零扩展 rcx,
                     // 再以 qword 写 vregs 槽 -> 高 32 位清零(兼容 x86 写 r32 语义)
+                    // (dword_ptr 不带显式模板参: 让 TArgs 推导为 Gp64&, 绑定 lvalue vsp;
+                    //  显式 <Gp64> 会把形参变成 Gp64&&, 传 lvalue 编译错)
                     a.bind(labels[3]);
-                    a.mov(zasm::x86::ecx, zasm::x86::dword_ptr<zasm::x86::Gp64>(vsp));
+                    a.mov(zasm::x86::ecx, zasm::x86::dword_ptr(vsp));
                     a.add(vsp, 4);
                     a.mov(zasm::x86::qword_ptr(zasm::x86::rdx), zasm::x86::rcx);
                     a.jmp(labels[5]);
