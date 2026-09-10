@@ -67,7 +67,9 @@ lief_section *covirt::binary::get_section(const std::string &name)
     return std::visit([&](auto&& x) {
         auto sections = x->sections();
         auto it = std::find_if(sections.begin(), sections.end(), [&](lief_section &section) { return section.name() == name.c_str(); });
-        
+
+        // 未找到时返回 nullptr(由调用方断言), 不能解引用 end()(UB -> SIGSEGV)
+        if (it == sections.end()) return static_cast<lief_section *>(nullptr);
         return dynamic_cast<lief_section*>(&(*it));
     }, specific);
 }
@@ -75,12 +77,25 @@ lief_section *covirt::binary::get_section(const std::string &name)
 lief_section *covirt::binary::get_section(uint64_t address)
 {
     return std::visit([&](auto&& x) {
+        using T = std::decay_t<decltype(x)>;
+
+        // [PE-VA-FIX] 调用方传入的是绝对 VA(marker VA = imagebase + RVA), 而
+        // LIEF PE::Section::virtual_address() 返回的是 RVA, 必须补 imagebase
+        // 才能落在同一地址空间; ELF 的 Section::virtual_address() 已含
+        // imagebase, 不能重复加。
+        // 修复前(无 bias) PE 永远匹配不到 -> 解引用 end() -> SIGSEGV, 表现为
+        // Windows PE 虚拟化从未成功(产物里没有 .covirt0 段)。
+        uint64_t bias = 0;
+        if constexpr (std::is_same_v<T, LIEF::PE::Binary*>)
+            bias = x->imagebase();
+
         auto sections = x->sections();
-        auto it = std::find_if(sections.begin(), sections.end(), [&](lief_section &section) { 
-            auto va_start = section.virtual_address();
+        auto it = std::find_if(sections.begin(), sections.end(), [&](lief_section &section) {
+            auto va_start = bias + section.virtual_address();
             return address >= va_start && address < va_start + section.size();
         });
-        
+
+        if (it == sections.end()) return static_cast<lief_section *>(nullptr);
         return dynamic_cast<lief_section*>(&(*it));
     }, specific);
 }
@@ -93,7 +108,9 @@ void covirt::binary::update()
 void covirt::binary::write_vm_entries(std::vector<covirt::subroutine> &routines, covirt::generic_vm_enter &vm_enter)
 {
     auto vm_section = get_section(".covirt0");
+    out::assertion(vm_section != nullptr, "vm section (.covirt0) not found");
     auto section_of_block = get_section(routines[0].start_va);
+    out::assertion(section_of_block != nullptr, "section containing first protected block not found");
     auto base = is_elf() ? section_of_block->virtual_address() : (imagebase() + section_of_block->virtual_address());
 
     std::vector<uint8_t> content;
@@ -121,6 +138,7 @@ void covirt::binary::write_vm_entries(std::vector<covirt::subroutine> &routines,
 void covirt::binary::write_vm_bytecode(std::vector<uint8_t> &lifted_bytes, std::vector<uint8_t> &vm_section_bytes, size_t data_start, size_t vcode_size)
 {
     auto vm_section = get_section(".covirt0");
+    out::assertion(vm_section != nullptr, "vm section (.covirt0) not found");
     std::memcpy(&vm_section_bytes[data_start], &lifted_bytes[0], lifted_bytes.size());
     for (int i = 0; i < vcode_size - lifted_bytes.size(); i++)
         vm_section_bytes[data_start + lifted_bytes.size() + i] = covirt::rand<uint8_t>();
