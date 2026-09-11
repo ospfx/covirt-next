@@ -1094,19 +1094,6 @@ namespace covirt::vm {
                     a.jmp(loop);
                     a.bind(done);
 
-                    // [VSTACK-BALANCE-FIX] 与 vcall 对称: 重入路径统一按 vip+retaddr
-                    // 两个槽(16 字节)出栈, 因此 exec_native 也必须压 16 字节 ——
-                    // 原实现只压 vip(8), 每次 exec_native 往返净漏 8 字节操作数栈:
-                    // 多次之后 vsp 下溢越过 vstack 底部, 写坏紧邻的 _vip/_vsp/saved_rsp
-                    // (实测 _vsp 由 2048 变 225、saved_rsp 最高字节被写成 0x01),
-                    // 随后 'add vsp,[_vsp]' 得到野指针 -> 下一次读 guest 寄存器保存区
-                    // 即 0xC0000005(表现为"第二次进入虚拟化区域必崩", 且只在 PE 上出现,
-                    // 因为两边 lift 出的字节码不同、走到该路径的次数不同)。
-                    // 压栈顺序与 vcall 保持一致: retaddr 先压(高地址), vip 后压(低地址)。
-                    a.sub(vsp, 8);
-                    a.mov(zasm::x86::r9, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["retaddr"]));
-                    a.mov(zasm::x86::qword_ptr(vsp), zasm::x86::r9);
-
                     // push current vip to global_labels["vstack"], in case we vmenter somewhere else
                     a.sub(vsp, 8);
                     a.mov(zasm::x86::qword_ptr(vsp), vip);
