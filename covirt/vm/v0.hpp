@@ -341,12 +341,15 @@ namespace covirt::vm {
                     a.pop(zasm::x86::r14);
                     a.pop(zasm::x86::r15);
 
-                    // [SAVED_RSP-REENTRANT] 恢复外层 saved_rsp(仅在 guest 寄存器已全部
-                    // 弹出之后, 用全局寻址, 不依赖 rsp; r9 为调用者易失, 覆盖安全)
+                    vm_enter_emitter.revert_effects(a);
+
+                    // [SAVED_RSP-REENTRANT] 必须在 revert_effects 之后恢复外层 saved_rsp:
+                    // revert_effects 要用「当前帧」的 saved_rsp 重算 native 栈指针,
+                    // 提前改写会让退出路径用错基址(实测该错误导致首次调用即 SIGSEGV)。
+                    // 此处 guest 寄存器已弹出、rsp 已还原, 用全局寻址不依赖 rsp;
+                    // r9 为调用者易失寄存器, 覆盖安全。
                     a.mov(zasm::x86::r9, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["saved_rsp_outer"]));
                     a.mov(zasm::x86::qword_ptr(zasm::x86::rip, global_labels["saved_rsp"]), zasm::x86::r9);
-
-                    vm_enter_emitter.revert_effects(a);
 
                     a.jmp(zasm::x86::qword_ptr(zasm::x86::rip, global_labels["retaddr"]));
                 }
