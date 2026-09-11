@@ -183,6 +183,7 @@ namespace covirt::vm {
             {"_vsp", {}},
             {"_vip", {}},
             {"vstack", {}},
+            {"vstack_guard", {}},
             {"vcode", {}},
             {"vtable", {}},
             {"retaddr", {}},

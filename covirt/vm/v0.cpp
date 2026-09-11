@@ -79,6 +79,16 @@ void covirt::vm::v0_vm::finalize(zasm::x86::Assembler& a)
     a.bind(global_labels["saved_rsp"]); a.dq(0);
     a.bind(global_labels["_vsp"]); a.dq(stack_size);
     a.bind(global_labels["_vip"]); a.dq(0);
+    // [VSTACK-GUARD] 在 _vip 与 vstack 之间插入保护区:
+    // 布局为 vcode | saved_rsp | _vsp | _vip | vstack | retaddr | vflags | vtable,
+    // 而操作数栈(vsp)从 vstack 顶部向下增长 —— 一旦出现压/弹不配平(历史上有过
+    // vcall 每次泄漏 8 字节的实例, 修复后 PE 侧仍有残留路径), 越界写会直接命中
+    // _vip/_vsp/saved_rsp: 表现为 _vsp 变成垃圾值(实测 225/ -11), 随后
+    // "add vsp, [_vsp]" 得到野指针, 下一次寄存器保存区访问即 0xC0000005,
+    // 且只在某个平台/某段字节码上复现, 极难定位。
+    // 加 4KB 保护区后: 小幅漂移只落在填充区, 关键全局不再被破坏; 漂移更大时
+    // 会在保护区中留下痕迹便于诊断。
+    a.bind(global_labels["vstack_guard"]); a.db(0, 4096);
     a.bind(global_labels["vstack"]); a.db(0, stack_size);
     a.bind(global_labels["retaddr"]); a.dq(0);
     a.bind(global_labels["vflags"]); a.dq(0);
