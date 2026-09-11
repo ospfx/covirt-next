@@ -84,7 +84,15 @@ void covirt::vm::v0_vm::finalize(zasm::x86::Assembler& a)
     a.bind(global_labels["vflags"]); a.dq(0);
 
     a.bind(global_labels["vtable"]);
-    a.dq(0, 8);
+    // [VTABLE-SIZE-FIX] 跳转表按 opcode 索引: vm_next_instruction 里
+    //   movzx rcx, byte [vip]; and cl, 0b00111111   → 索引 0..63
+    // 而 venter 的 create_jump_table_once 会写入 28 个入口(224 字节)。
+    // 原实现只分配 8 项(64 字节): 填表时越界写 160 字节, 覆盖紧随其后的
+    // 数据/代码。PE 布局下这些被踩的字节随后被使用, 表现为
+    // "第一次进入虚拟化区域正常, 第二次进入即 0xC0000005 访问违例"
+    // (Linux 布局恰好把越界区落在填充区, 所以一直没暴露)。
+    // 必须按 6 位 opcode 全空间分配 64 项 = 512 字节。
+    a.dq(0, 64);
 }
 
 void covirt::vm::v0_vm::vm_next_instruction(zasm::x86::Assembler& a, std::optional<zasm::Label> label) 
