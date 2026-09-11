@@ -110,6 +110,25 @@ void covirt::vm::v0_vm::vm_next_instruction(zasm::x86::Assembler& a, std::option
     if (label.has_value())
         a.bind(label.value());
 
+    // [VSP-GUARD] 每次分发前校验操作数栈指针(vsp == rsi):
+    // covirt 用 rsi 存放 vsp、rax 存放 vip; 某些路径(guest 寄存器恢复、native
+    // 往返、异常分支)可能把 guest 的 rsi 直接装进 vsp。实测 wine 现场为
+    // rsi=0x1002(小整数, 非法指针), 随后 "读 guest 内存" 立即 page fault,
+    // 表现为某一步突然崩溃、且与平台/字节码相关, 极难定位。
+    // 这里做一次自愈: 若 vsp 不在 [&vstack, &vstack + stack_size) 区间内,
+    // 就用 _vsp(VM 自己维护的操作数栈深度) 重建, 使 VM 继续正确执行。
+    {
+        auto vsp_ok = a.createLabel();
+        a.lea(zasm::x86::r10, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["vstack"]));
+        a.mov(zasm::x86::r11, vsp);
+        a.sub(zasm::x86::r11, zasm::x86::r10);
+        a.cmp(zasm::x86::r11, stack_size);
+        a.jb(vsp_ok);
+        a.mov(vsp, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["_vsp"]));
+        a.add(vsp, zasm::x86::r10);
+        a.bind(vsp_ok);
+    }
+
     a.movzx(zasm::x86::rcx, zasm::x86::byte_ptr(vip));
     a.and_(zasm::x86::cl, 0b00111111);
     a.lea(zasm::x86::r9, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["vtable"]));
