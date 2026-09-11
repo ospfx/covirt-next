@@ -247,7 +247,19 @@ namespace covirt::vm {
         void get_vreg_address(zasm::x86::Assembler& a);
         void get_vreg_value(zasm::x86::Assembler& a);
 
+        // [VCODE-TRAP] opcode 63: 未被任何真实指令占用(现有实现仅用约 28 个槽位)。
+        // 用于把 vcode 缓冲区尾部的填充字节填成"陷阱": 一旦 VM 越过 lift 出的
+        // 字节码末尾执行到填充区, 就会命中 ud2 产生 SIGILL(可辨认), 而不是把随机
+        // 字节当指令执行导致的随机 SIGSEGV —— 便于判定"是否越界执行"这一机制。
+        static constexpr uint8_t kTrapOpcode = 63;
+
         std::map<uint8_t, fn_vm_handler_t> vm_impl = {
+            {
+                kTrapOpcode, [&](zasm::x86::Assembler& a) {
+                    a.bind(global_labels["vtrap"]);
+                    a.ud2();
+                }
+            },
             {
                 uint8_t(v0_op::vm_enter), [&](zasm::x86::Assembler& a) {
                     a.bind(global_labels["venter"]);

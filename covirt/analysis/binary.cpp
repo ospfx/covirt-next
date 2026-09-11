@@ -141,7 +141,10 @@ void covirt::binary::write_vm_bytecode(std::vector<uint8_t> &lifted_bytes, std::
     out::assertion(vm_section != nullptr, "vm section (.covirt0) not found");
     std::memcpy(&vm_section_bytes[data_start], &lifted_bytes[0], lifted_bytes.size());
     for (int i = 0; i < vcode_size - lifted_bytes.size(); i++)
-        vm_section_bytes[data_start + lifted_bytes.size() + i] = covirt::rand<uint8_t>();
+        // [VCODE-TRAP] 填充改为可辨认的陷阱 opcode(见 v0.hpp kTrapOpcode):
+        // 原实现用随机字节, 导致"越过字节码末尾"时行为随构建而变(有时恰好能跑完,
+        // 有时立刻崩), 缺陷不可复现。填成陷阱后, 越界执行会稳定地产生 SIGILL。
+        vm_section_bytes[data_start + lifted_bytes.size() + i] = 63;
     vm_section->content(vm_section_bytes);
     update();
 }
