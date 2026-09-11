@@ -88,7 +88,7 @@ void covirt::vm::v0_vm::finalize(zasm::x86::Assembler& a)
     // 且只在某个平台/某段字节码上复现, 极难定位。
     // 加 4KB 保护区后: 小幅漂移只落在填充区, 关键全局不再被破坏; 漂移更大时
     // 会在保护区中留下痕迹便于诊断。
-    a.bind(global_labels["vstack_guard"]); a.db(0, 4096);
+    a.bind(global_labels["vstack_guard"]); a.db(0, 65536);
     a.bind(global_labels["vstack"]); a.db(0, stack_size);
     a.bind(global_labels["retaddr"]); a.dq(0);
     a.bind(global_labels["vflags"]); a.dq(0);
