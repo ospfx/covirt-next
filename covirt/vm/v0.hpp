@@ -180,6 +180,7 @@ namespace covirt::vm {
 
         std::map<std::string, zasm::Label> global_labels = {
             {"saved_rsp", {}},
+            {"saved_rsp_outer", {}},
             {"_vsp", {}},
             {"_vip", {}},
             {"vstack", {}},
@@ -254,6 +255,15 @@ namespace covirt::vm {
                     a.pop(zasm::x86::r11);
                     a.mov(zasm::x86::qword_ptr(zasm::x86::rip, global_labels["retaddr"]), zasm::x86::r11);
                     a.pop(zasm::x86::r11);
+                    // [SAVED_RSP-REENTRANT] 覆盖前把外层基址存进备用全局:
+                    // saved_rsp 是 guest 寄存器保存区 [saved_rsp-128, saved_rsp) 的基址,
+                    // 且是单一全局 —— 嵌套/重入进入 VM 时内层会覆盖它, 外层退出后用错误
+                    // 基址恢复寄存器, 于是 rsi(vsp)/rax(vip) 取到内层数值 -> 野指针 ->
+                    // 下一次读写 guest 内存即 page fault(wine 现场 rsi=0x1002)。
+                    // 用备用全局而不是压栈: 不改动 -8..-128 的既有布局与栈平衡
+                    // (此前两次改栈语义的尝试都造成了回归)。r9 为调用者易失, 此处占用安全。
+                    a.mov(zasm::x86::r9, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["saved_rsp"]));
+                    a.mov(zasm::x86::qword_ptr(zasm::x86::rip, global_labels["saved_rsp_outer"]), zasm::x86::r9);
                     a.mov(zasm::x86::qword_ptr(zasm::x86::rip, global_labels["saved_rsp"]), zasm::x86::rsp);
 
                     // to-do: save r9, r10 before?
@@ -330,6 +340,11 @@ namespace covirt::vm {
                     a.pop(zasm::x86::r13);
                     a.pop(zasm::x86::r14);
                     a.pop(zasm::x86::r15);
+
+                    // [SAVED_RSP-REENTRANT] 恢复外层 saved_rsp(仅在 guest 寄存器已全部
+                    // 弹出之后, 用全局寻址, 不依赖 rsp; r9 为调用者易失, 覆盖安全)
+                    a.mov(zasm::x86::r9, zasm::x86::qword_ptr(zasm::x86::rip, global_labels["saved_rsp_outer"]));
+                    a.mov(zasm::x86::qword_ptr(zasm::x86::rip, global_labels["saved_rsp"]), zasm::x86::r9);
 
                     vm_enter_emitter.revert_effects(a);
 

@@ -77,6 +77,7 @@ void covirt::vm::v0_vm::finalize(zasm::x86::Assembler& a)
 
     a.bind(global_labels["vcode"]); a.db(0, code_size);
     a.bind(global_labels["saved_rsp"]); a.dq(0);
+    a.bind(global_labels["saved_rsp_outer"]); a.dq(0);
     a.bind(global_labels["_vsp"]); a.dq(stack_size);
     a.bind(global_labels["_vip"]); a.dq(0);
     // [VSTACK-GUARD] 在 _vip 与 vstack 之间插入保护区:
